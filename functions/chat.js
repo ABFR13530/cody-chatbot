@@ -8,42 +8,64 @@ exports.handler = async (event) => {
     return { statusCode: 200, headers, body: '' };
   }
 
+  // Vérifier la clé API
+  if (!process.env.GEMINI_API_KEY) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'GEMINI_API_KEY non configurée dans Netlify' })
+    };
+  }
+
+  console.log('Clé API présente:', process.env.GEMINI_API_KEY.substring(0, 10) + '...');
+
   try {
     const { messages, systemPrompt } = JSON.parse(event.body);
     
-    // Convertir format Anthropic → Gemini
+    // Convertir format
     const geminiMessages = messages.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }]
     }));
 
-    // CORRECTION : Ajouter le systemPrompt comme premier message utilisateur
+    // Ajouter system prompt au premier message
     if (systemPrompt && geminiMessages.length > 0) {
       geminiMessages[0].parts[0].text = systemPrompt + "\n\n" + geminiMessages[0].parts[0].text;
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: geminiMessages,
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 2000
-          }
-        })
-      }
-    );
+    const apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    
+    console.log('Appel API Gemini...');
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: geminiMessages,
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 2000
+        }
+      })
+    });
+
+    console.log('Status:', response.status);
+    
+    const responseText = await response.text();
+    console.log('Réponse brute:', responseText);
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error('Erreur Gemini:', error);
-      throw new Error(error);
+      return {
+        statusCode: response.status,
+        headers,
+        body: JSON.stringify({ 
+          error: `Erreur ${response.status}`,
+          details: responseText
+        })
+      };
     }
 
-    const data = await response.json();
+    const data = JSON.parse(responseText);
     const text = data.candidates[0].content.parts[0].text;
     
     return {
@@ -53,11 +75,14 @@ exports.handler = async (event) => {
     };
     
   } catch (error) {
-    console.error('Exception:', error);
+    console.error('Exception complète:', error);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({ 
+        error: error.message,
+        stack: error.stack
+      })
     };
   }
 };
