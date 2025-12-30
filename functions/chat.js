@@ -17,7 +17,11 @@ exports.handler = async (event) => {
       parts: [{ text: m.content }]
     }));
 
-    // CORRECTION : Utiliser v1 au lieu de v1beta
+    // CORRECTION : Ajouter le systemPrompt comme premier message utilisateur
+    if (systemPrompt && geminiMessages.length > 0) {
+      geminiMessages[0].parts[0].text = systemPrompt + "\n\n" + geminiMessages[0].parts[0].text;
+    }
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -25,7 +29,6 @@ exports.handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: geminiMessages,
-          systemInstruction: { parts: [{ text: systemPrompt }] },
           generationConfig: {
             temperature: 0.3,
             maxOutputTokens: 2000
