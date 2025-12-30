@@ -1,9 +1,4 @@
 exports.handler = async (event) => {
-  // Log pour debug
-  console.log('=== FONCTION APPELÉE ===');
-  console.log('Clé API présente ?', !!process.env.ANTHROPIC_API_KEY);
-  console.log('Clé commence par sk-ant- ?', process.env.ANTHROPIC_API_KEY?.startsWith('sk-ant-'));
-  
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Content-Type': 'application/json'
@@ -13,83 +8,50 @@ exports.handler = async (event) => {
     return { statusCode: 200, headers, body: '' };
   }
 
-  // Test 1 : Clé existe ?
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('❌ PAS DE CLÉ API');
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ 
-        error: 'Clé API non configurée dans Environment Variables de Netlify' 
-      })
-    };
-  }
-  
-  // Test 2 : Clé valide ?
-  if (!process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-')) {
-    console.error('❌ CLÉ API INVALIDE');
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ 
-        error: 'Format de clé API invalide (doit commencer par sk-ant-)' 
-      })
-    };
-  }
-
   try {
     const { messages, systemPrompt } = JSON.parse(event.body);
     
-    console.log('Appel API Anthropic...');
-    
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        temperature: 0.3,
-        system: systemPrompt,
-        messages
-      })
-    });
+    // Convertir format Anthropic → Gemini
+    const geminiMessages = messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
 
-    console.log('Status API:', response.status);
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: geminiMessages,
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 2000
+          }
+        })
+      }
+    );
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ ERREUR ANTHROPIC:', errorText);
-      return {
-        statusCode: response.status,
-        headers,
-        body: JSON.stringify({ 
-          error: `Erreur API Anthropic (${response.status}): ${errorText}` 
-        })
-      };
+      const error = await response.text();
+      throw new Error(error);
     }
 
     const data = await response.json();
-    console.log('✅ Réponse OK');
+    const text = data.candidates[0].content.parts[0].text;
     
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ response: data.content[0].text })
+      body: JSON.stringify({ response: text })
     };
     
   } catch (error) {
-    console.error('❌ EXCEPTION:', error);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ 
-        error: `Exception: ${error.message}`,
-        stack: error.stack
-      })
+      body: JSON.stringify({ error: error.message })
     };
   }
 };
